@@ -1,0 +1,86 @@
+"""Golden dataset for evaluation."""[
+    {
+        "example_id": "golden_001",
+        "description": "Retry logic added to payment gateway — expect medium risk, performance flag",
+        "input": {
+            "repo_full_name": "acme/payments-service",
+            "pr_number": 142,
+            "base_sha": "abc1234567",
+            "head_sha": "def4567890",
+            "pr_title": "Add retry logic to payment processor",
+            "pr_description": "Adds exponential backoff to the payment gateway client. Fixes ENG-998.",
+            "ticket_ids": [
+                "ENG-998"
+            ],
+            "author": "jane.doe",
+            "changed_files": [
+                "src/payments/gateway.py",
+                "tests/test_gateway.py"
+            ]
+        },
+        "expected": {
+            "risk_level": "medium",
+            "must_flag": [
+                "performance",
+                "design"
+            ],
+            "must_not_flag": [
+                "security"
+            ]
+        }
+    },
+    {
+        "example_id": "golden_002",
+        "description": "Removing JWT validation middleware — expect high risk, security + breaking_change",
+        "input": {
+            "repo_full_name": "acme/auth-service",
+            "pr_number": 201,
+            "base_sha": "fff0001234",
+            "head_sha": "aaa1115678",
+            "pr_title": "Remove deprecated JWT validation middleware",
+            "pr_description": "Cleans up old auth middleware per ENG-1021",
+            "ticket_ids": [
+                "ENG-1021"
+            ],
+            "author": "john.smith",
+            "changed_files": [
+                "src/auth/middleware.py",
+                "src/auth/validators.py"
+            ]
+        },
+        "expected": {
+            "risk_level": "high",
+            "must_flag": [
+                "security",
+                "breaking_change"
+            ],
+            "must_not_flag": []
+        }
+    },
+    {
+        "example_id": "golden_003",
+        "description": "New read-only analytics endpoint — expect low risk, no security or breaking flags",
+        "input": {
+            "repo_full_name": "acme/reporting-service",
+            "pr_number": 88,
+            "base_sha": "cc12341234",
+            "head_sha": "dd56785678",
+            "pr_title": "Add /reports/monthly endpoint",
+            "pr_description": "New read-only endpoint for monthly revenue reports. No auth changes.",
+            "ticket_ids": [],
+            "author": "alice.wang",
+            "changed_files": [
+                "src/reports/monthly.py",
+                "tests/test_monthly.py"
+            ]
+        },
+        "expected": {
+            "risk_level": "low",
+            "must_flag": [],
+            "must_not_flag": [
+                "security",
+                "breaking_change"
+            ]
+        }
+    }
+]
