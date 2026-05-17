@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import tiktoken
+from github import GithubException
 
 from src.ingestion.chunker import DiffChunker
+from src.ingestion.git_parser import GitDiffParser
 
 SAMPLE_DIFF_2_FILES = """diff --git a/src/api/routes.py b/src/api/routes.py
 index 111..222 100644
@@ -71,3 +75,57 @@ class TestDiffChunker:
         chunker = DiffChunker()
         result = chunker.chunk("")
         assert result == []
+
+
+class TestGitDiffParserFallback:
+    """Tests for GitHub compare fallback behavior."""
+
+    def test_build_diff_from_pull_files(self):
+        """Fallback builds unified diff from pull file patches."""
+        file1 = SimpleNamespace(
+            filename="src/app.py",
+            status="modified",
+            patch="@@ -1 +1 @@\n-print('old')\n+print('new')",
+        )
+        file2 = SimpleNamespace(
+            filename="assets/logo.png",
+            status="modified",
+            patch=None,
+        )
+        pull = SimpleNamespace(get_files=lambda: [file1, file2])
+        repo = SimpleNamespace(get_pull=lambda _pr: pull)
+
+        diff = GitDiffParser._build_diff_from_pull_files(repo, 1)
+        assert "diff --git a/src/app.py b/src/app.py" in diff
+        assert "+print('new')" in diff
+        assert "Binary files a/assets/logo.png and b/assets/logo.png differ" in diff
+
+    async def test_fetch_diff_fallbacks_on_compare_404(self):
+        """fetch_diff uses pull-files fallback when compare endpoint returns 404."""
+
+        class DummyEncoder:
+            def encode(self, text: str) -> list[int]:
+                return [0] * len(text)
+
+        parser = object.__new__(GitDiffParser)
+        parser.MAX_TOKENS = 100_000
+        parser._encoder = DummyEncoder()
+
+        file1 = SimpleNamespace(
+            filename="src/app.py",
+            status="modified",
+            patch="@@ -1 +1 @@\n-print('old')\n+print('new')",
+        )
+        pull = SimpleNamespace(get_files=lambda: [file1])
+
+        class RepoStub:
+            def compare(self, _base, _head):
+                raise GithubException(404, {"message": "Not Found"}, None)
+
+            def get_pull(self, _pr):
+                return pull
+
+        parser._gh = SimpleNamespace(get_repo=lambda _name: RepoStub())
+
+        diff = await parser.fetch_diff("vivekvxz/use-cases", "abc1234", "def5678", 1)
+        assert "diff --git a/src/app.py b/src/app.py" in diff

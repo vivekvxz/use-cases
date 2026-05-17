@@ -17,7 +17,14 @@ class JiraFetcher:
     def __init__(self) -> None:
         """Initialize Jira fetcher."""
         settings = get_settings()
-        if settings.jira_enabled:
+        self._jira_enabled = settings.jira_enabled
+
+        if not self._jira_enabled:
+            self._client = None
+            logger.info("jira_disabled_by_config")
+            return
+
+        if settings.jira_configured:
             from jira import JIRA
 
             self._client = JIRA(
@@ -28,8 +35,8 @@ class JiraFetcher:
         else:
             self._client = None
             logger.warning(
-                "jira_not_configured",
-                hint="Set JIRA_SERVER, JIRA_EMAIL, JIRA_API_TOKEN in .env to enable ticket fetch",
+                "jira_enabled_but_not_configured",
+                hint="Set JIRA_SERVER, JIRA_EMAIL, JIRA_API_TOKEN when JIRA_ENABLED=true",
             )
 
     @retry(
@@ -45,9 +52,14 @@ class JiraFetcher:
             List of ticket dicts
         """
         if self._client is None:
+            if not self._jira_enabled:
+                return []
             return [
                 {
-                    "note": "Jira not configured. Set JIRA_SERVER, JIRA_EMAIL, JIRA_API_TOKEN in .env"
+                    "note": (
+                        "Jira enabled but not configured. "
+                        "Set JIRA_SERVER, JIRA_EMAIL, JIRA_API_TOKEN in .env"
+                    )
                 }
             ]
 

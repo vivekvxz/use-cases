@@ -6,7 +6,6 @@ import asyncio
 from typing import Optional
 
 import typer
-from github import Github
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -18,6 +17,7 @@ from src.config import get_settings
 from src.evals.harness import EvalHarness
 from src.models.pr_analysis import PRAnalysisRequest
 from src.rag.pipeline import RAGPipeline
+from src.tools.github_pr import fetch_pr_details, parse_github_pr_url
 
 app = typer.Typer(
     name="release-agent",
@@ -33,20 +33,33 @@ console = Console()
 
 @app.command()
 def analyze(
-    repo: str = typer.Option(..., help="GitHub repo e.g. acme/payments-service"),
-    pr: int = typer.Option(..., help="PR number"),
+    repo: Optional[str] = typer.Option(
+        None, help="GitHub repo e.g. acme/payments-service"
+    ),
+    pr: Optional[int] = typer.Option(None, help="PR number"),
+    pr_url: Optional[str] = typer.Option(
+        None,
+        help="Full GitHub PR URL e.g. https://github.com/acme/payments/pull/42",
+    ),
     base: Optional[str] = typer.Option(None, help="Base SHA (auto-fetched if omitted)"),
     head: Optional[str] = typer.Option(None, help="Head SHA (auto-fetched if omitted)"),
     tickets: Optional[str] = typer.Option(None, help="Comma-separated Jira IDs"),
     output: str = typer.Option("console", help="console | markdown | json"),
 ):
     """Analyse a GitHub pull request and produce a risk report."""
-    asyncio.run(_analyze(repo, pr, base, head, tickets, output))
+    if pr_url and (repo or pr):
+        raise typer.BadParameter("Use either --pr-url OR (--repo and --pr), not both")
+
+    if not pr_url and (not repo or pr is None):
+        raise typer.BadParameter("Provide --pr-url, or provide both --repo and --pr")
+
+    asyncio.run(_analyze(repo, pr, pr_url, base, head, tickets, output))
 
 
 async def _analyze(
-    repo: str,
-    pr_number: int,
+    repo: str | None,
+    pr_number: int | None,
+    pr_url: str | None,
     base: str | None,
     head: str | None,
     tickets: str | None,
@@ -55,12 +68,16 @@ async def _analyze(
     """Async implementation of the analyze command."""
     settings = get_settings()
 
-    # Auto-fetch base/head if not provided
-    if not base or not head:
-        gh = Github(settings.github_token)
-        pr_obj = gh.get_repo(repo).get_pull(pr_number)
-        base = base or pr_obj.base.sha
-        head = head or pr_obj.head.sha
+    if pr_url:
+        repo, pr_number = parse_github_pr_url(pr_url)
+
+    if not repo or pr_number is None:
+        raise ValueError("Could not resolve repo/pr from input")
+
+    details = fetch_pr_details(repo, pr_number, settings.github_token)
+
+    base = base or details.base_sha
+    head = head or details.head_sha
 
     # Build request
     request = PRAnalysisRequest(
@@ -68,9 +85,11 @@ async def _analyze(
         pr_number=pr_number,
         base_sha=base,
         head_sha=head,
-        pr_title="",
-        author="",
+        pr_title=details.title,
+        pr_description=details.description,
         ticket_ids=tickets.split(",") if tickets else [],
+        author=details.author,
+        changed_files=details.changed_files,
     )
 
     # Run with spinner

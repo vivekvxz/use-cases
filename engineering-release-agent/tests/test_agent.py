@@ -74,3 +74,19 @@ class TestAgentNodes:
         assert "rag_context" in result
         assert "lint_results" in result
         assert result["current_node"] == "analysis"
+
+
+class TestGraphRouting:
+    """Tests for graph routing helpers."""
+
+    def test_route_by_current_node_success(self):
+        """Generic router returns current_node when present."""
+        from src.agent.graph import _route_by_current_node
+
+        assert _route_by_current_node({"current_node": "analysis"}) == "analysis"
+
+    def test_route_by_current_node_defaults_error(self):
+        """Generic router falls back to error when current_node is missing."""
+        from src.agent.graph import _route_by_current_node
+
+        assert _route_by_current_node({}) == "error"

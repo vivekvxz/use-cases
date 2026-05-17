@@ -7,6 +7,7 @@ import tempfile
 from unittest.mock import MagicMock, patch
 
 from src.agent.hitl import HITLManager
+from src.models.pr_analysis import PRAnalysisRequest, RiskLevel
 
 
 class TestHITLManager:
@@ -101,6 +102,40 @@ class TestHITLManager:
                 decision = manager.get_decision("test_789")
                 assert decision is not None
                 assert decision["decision"] == "approve"
+
+    def test_save_pending_serializes_pydantic_models(self):
+        """save_pending() serializes PRAnalysisRequest and enum values in state."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from pathlib import Path as RealPath
+
+            hitl_dir = RealPath(tmpdir) / "hitl"
+            with patch.object(HITLManager, "HITL_DIR", hitl_dir):
+                manager = HITLManager()
+                request = PRAnalysisRequest(
+                    repo_full_name="vivekvxz/use-cases",
+                    pr_number=1,
+                    base_sha="abcdef1",
+                    head_sha="1234567",
+                    pr_title="Test PR",
+                    pr_description="Desc",
+                    ticket_ids=[],
+                    author="vivekvxz",
+                    changed_files=["src/app.py"],
+                )
+                state = {
+                    "request": request,
+                    "overall_risk_level": RiskLevel.HIGH,
+                }
+
+                manager.save_pending("hitl_serialize_test", state)
+
+                with open(
+                    hitl_dir / "hitl_serialize_test.json", "r", encoding="utf-8"
+                ) as f:
+                    saved = json.load(f)
+
+                assert saved["request"]["repo_full_name"] == "vivekvxz/use-cases"
+                assert saved["overall_risk_level"] == "high"
 
 
 class TestAgentGraph:

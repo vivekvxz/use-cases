@@ -158,6 +158,29 @@ class TestConfiguration:
         provider = get_settings().llm_provider
         assert provider in ["openai", "ollama"]
 
+    def test_ollama_is_default_provider(self):
+        """Settings defaults to local Ollama when no flags are provided."""
+        from src.config import Settings
+
+        settings = Settings()
+        assert settings.use_ollama is True
+        assert settings.openai_enabled is False
+        assert settings.llm_provider == "ollama"
+
+    def test_openai_requires_key_when_enabled(self):
+        """OPENAI_ENABLED=true requires OPENAI_API_KEY if Ollama is disabled."""
+        from src.config import Settings
+
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            Settings(use_ollama=False, openai_enabled=True, openai_api_key="")
+
+    def test_no_provider_enabled_is_invalid(self):
+        """Disabling both Ollama and OpenAI is rejected."""
+        from src.config import Settings
+
+        with pytest.raises(ValueError, match="No LLM provider enabled"):
+            Settings(use_ollama=False, openai_enabled=False)
+
     def test_thresholds_accept_string_values(self):
         """Threshold fields parse string values from environment-like inputs."""
         from src.config import Settings

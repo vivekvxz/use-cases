@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from importlib import import_module
+
 import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -16,11 +18,19 @@ class Embedder:
     def __init__(self) -> None:
         """Initialize embedder with configured LLM backend."""
         settings = get_settings()
+        self._settings = settings
         if settings.use_ollama:
-            from langchain_community.embeddings import OllamaEmbeddings
+            try:
+                ollama_embeddings_cls = import_module(
+                    "langchain_ollama"
+                ).OllamaEmbeddings
+            except ImportError:  # pragma: no cover - compatibility path
+                ollama_embeddings_cls = import_module(
+                    "langchain_community.embeddings"
+                ).OllamaEmbeddings
 
-            self._embeddings = OllamaEmbeddings(
-                model="nomic-embed-text",
+            self._embeddings = ollama_embeddings_cls(
+                model=settings.ollama_embed_model,
                 base_url=settings.ollama_base_url,
             )
             self.BATCH_SIZE = 50
@@ -56,7 +66,15 @@ class Embedder:
                 total_batches=total_batches,
                 batch_size=len(batch),
             )
-            embeddings = await self._embeddings.aembed_documents(batch)
+            try:
+                embeddings = await self._embeddings.aembed_documents(batch)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                if self._settings.use_ollama and "not found" in str(exc).lower():
+                    raise RuntimeError(
+                        "Ollama embedding model not found. Run: "
+                        f"ollama pull {self._settings.ollama_embed_model}"
+                    ) from exc
+                raise
             all_embeddings.extend(embeddings)
 
         return all_embeddings
@@ -70,4 +88,12 @@ class Embedder:
         Returns:
             Float vector
         """
-        return await self._embeddings.aembed_query(text)
+        try:
+            return await self._embeddings.aembed_query(text)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            if self._settings.use_ollama and "not found" in str(exc).lower():
+                raise RuntimeError(
+                    "Ollama embedding model not found. Run: "
+                    f"ollama pull {self._settings.ollama_embed_model}"
+                ) from exc
+            raise
