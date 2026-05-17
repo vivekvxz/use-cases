@@ -157,3 +157,27 @@ class TestConfiguration:
 
         provider = get_settings().llm_provider
         assert provider in ["openai", "ollama"]
+
+    def test_thresholds_accept_string_values(self):
+        """Threshold fields parse string values from environment-like inputs."""
+        from src.config import Settings
+
+        settings = Settings(
+            use_ollama=True,
+            hitl_risk_threshold="0.80",
+            confidence_threshold="0.60",
+        )
+
+        assert settings.hitl_risk_threshold == pytest.approx(0.8)
+        assert settings.confidence_threshold == pytest.approx(0.6)
+
+    def test_thresholds_reject_non_numeric_values(self):
+        """Threshold fields fail validation for non-numeric values."""
+        from src.config import Settings
+
+        with pytest.raises(ValueError, match="Threshold must be a number"):
+            Settings(
+                use_ollama=True,
+                hitl_risk_threshold="not-a-number",
+                confidence_threshold=0.6,
+            )

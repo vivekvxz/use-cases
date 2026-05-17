@@ -81,11 +81,16 @@ class Settings(BaseSettings):
 
     @field_validator("hitl_risk_threshold", "confidence_threshold", mode="before")
     @classmethod
-    def validate_threshold(cls, v: float) -> float:
-        """Validate that thresholds are between 0.0 and 1.0."""
-        if not 0.0 <= v <= 1.0:
+    def validate_threshold(cls, v: object) -> float:
+        """Validate that thresholds are numeric values between 0.0 and 1.0."""
+        try:
+            value = float(v)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Threshold must be a number between 0.0 and 1.0") from exc
+
+        if not 0.0 <= value <= 1.0:
             raise ValueError("Threshold must be between 0.0 and 1.0")
-        return v
+        return value
 
     @model_validator(mode="after")
     def validate_llm_config(self) -> Settings:
