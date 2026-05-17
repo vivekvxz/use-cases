@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
@@ -25,6 +27,11 @@ class HITLPauseError(Exception):
     """Raised when the agent pauses and waits for human review."""
 
 
+def _route_by_current_node(state: AgentState) -> str:
+    """Generic conditional router based on current_node output."""
+    return state.get("current_node", "error")
+
+
 def _route_from_hitl_gate(state: AgentState) -> str:
     """Conditional routing function after hitl_gate_node."""
     return state.get("current_node", "error")
@@ -44,9 +51,33 @@ def build_graph():
 
     # Add edges
     graph.add_edge(START, "ingest")
-    graph.add_edge("ingest", "analysis")
-    graph.add_edge("analysis", "risk_scoring")
-    graph.add_edge("risk_scoring", "hitl_gate")
+
+    graph.add_conditional_edges(
+        "ingest",
+        _route_by_current_node,
+        {
+            "analysis": "analysis",
+            "error": "error",
+        },
+    )
+
+    graph.add_conditional_edges(
+        "analysis",
+        _route_by_current_node,
+        {
+            "risk_scoring": "risk_scoring",
+            "error": "error",
+        },
+    )
+
+    graph.add_conditional_edges(
+        "risk_scoring",
+        _route_by_current_node,
+        {
+            "hitl_gate": "hitl_gate",
+            "error": "error",
+        },
+    )
 
     # Conditional edge from hitl_gate
     graph.add_conditional_edges(
@@ -105,7 +136,9 @@ async def run_agent(request: PRAnalysisRequest) -> PRAnalysisResult:
         "tokens_used": 0,
     }
 
-    thread_id = f"{request.repo_full_name.replace('/', '_')}_{request.pr_number}"
+    thread_id = (
+        f"{request.repo_full_name.replace('/', '_')}_{request.pr_number}_{uuid4().hex[:8]}"
+    )
     config = {"configurable": {"thread_id": thread_id}}
 
     final_state = await release_agent_graph.ainvoke(initial_state, config=config)

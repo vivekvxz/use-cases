@@ -35,7 +35,11 @@ class GitDiffParser:
         stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10)
     )
     async def fetch_diff(
-        self, repo_full_name: str, base_sha: str, head_sha: str
+        self,
+        repo_full_name: str,
+        base_sha: str,
+        head_sha: str,
+        pr_number: int | None = None,
     ) -> str:
         """Fetch the unified diff between base_sha and head_sha from GitHub.
 
@@ -80,8 +84,68 @@ class GitDiffParser:
             return diff
 
         except GithubException as e:
+            if getattr(e, "status", None) == 404 and pr_number is not None:
+                logger.warning(
+                    "compare_failed_fallback_to_pull_files",
+                    repo=repo_full_name,
+                    pr=pr_number,
+                    error=str(e),
+                )
+                repo = self._gh.get_repo(repo_full_name)
+                diff = self._build_diff_from_pull_files(repo, pr_number)
+                token_count = len(self._encoder.encode(diff))
+                if token_count > self.MAX_TOKENS:
+                    raise ValueError(
+                        f"Diff exceeds MAX_TOKENS ({token_count} > {self.MAX_TOKENS})"
+                    )
+
+                logger.info(
+                    "diff_fetched_via_pull_files",
+                    repo=repo_full_name,
+                    pr=pr_number,
+                    token_count=token_count,
+                )
+                return diff
+
             logger.error("github_error", repo=repo_full_name, error=str(e))
             raise
+
+    @staticmethod
+    def _build_diff_from_pull_files(repo, pr_number: int) -> str:
+        """Build a unified diff string from pull request file patches.
+
+        This is used as a fallback when GitHub compare(base, head) cannot be resolved.
+        """
+        pull = repo.get_pull(pr_number)
+        diff_parts: list[str] = []
+
+        for file in pull.get_files():
+            filename = file.filename
+            status = getattr(file, "status", "modified")
+
+            if status == "added":
+                old_header = "--- /dev/null"
+                new_header = f"+++ b/{filename}"
+            elif status == "removed":
+                old_header = f"--- a/{filename}"
+                new_header = "+++ /dev/null"
+            else:
+                old_header = f"--- a/{filename}"
+                new_header = f"+++ b/{filename}"
+
+            diff_parts.append(f"diff --git a/{filename} b/{filename}")
+            diff_parts.append(old_header)
+            diff_parts.append(new_header)
+
+            patch = getattr(file, "patch", None)
+            if patch:
+                diff_parts.append(patch)
+            else:
+                diff_parts.append(
+                    f"Binary files a/{filename} and b/{filename} differ"
+                )
+
+        return "\n".join(diff_parts)
 
     def parse_changed_files(self, diff: str) -> list[dict]:
         """Parse a raw unified diff into structured file dicts.

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from uuid import UUID
 
 import structlog
+from pydantic import BaseModel
 
 logger = structlog.get_logger(__name__)
 
@@ -23,11 +25,15 @@ class HITLManager:
         self.HITL_DIR.mkdir(parents=True, exist_ok=True)
 
     def _json_serialiser(self, obj):  # noqa: ANN001, ANN201
-        """Custom JSON serialiser for UUID and datetime objects."""
+        """Custom JSON serialiser for runtime objects in agent state."""
         if isinstance(obj, UUID):
             return str(obj)
         if isinstance(obj, datetime):
             return obj.isoformat()
+        if isinstance(obj, Enum):
+            return obj.value
+        if isinstance(obj, BaseModel):
+            return obj.model_dump(mode="json")
         raise TypeError(f"Object of type {type(obj).__name__} is not JSON serialisable")
 
     def save_pending(self, analysis_id: str, state: dict) -> Path:

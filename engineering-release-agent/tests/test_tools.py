@@ -6,6 +6,7 @@ import pytest
 
 from src.tools.code_linter import CodeLinter
 from src.tools.diff_scorer import DiffScorer
+from src.tools.github_pr import parse_github_pr_url
 
 RISKY_DIFF = (
     "diff --git a/src/auth/middleware.py b/src/auth/middleware.py\n"
@@ -87,3 +88,20 @@ class TestCodeLinter:
         result = linter.lint({})
         formatted = linter.format_for_prompt(result)
         assert "No lint issues found" in formatted or "No lint issues" in formatted
+
+
+class TestGitHubPRTools:
+    """Tests for GitHub PR helper utilities."""
+
+    def test_parse_github_pr_url_valid(self):
+        """Valid PR URL parses into repo slug and PR number."""
+        repo, pr_number = parse_github_pr_url(
+            "https://github.com/vivekvxz/use-cases/pull/1"
+        )
+        assert repo == "vivekvxz/use-cases"
+        assert pr_number == 1
+
+    def test_parse_github_pr_url_invalid(self):
+        """Invalid URL format raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid PR URL"):
+            parse_github_pr_url("https://github.com/vivekvxz/use-cases/issues/1")

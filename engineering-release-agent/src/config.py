@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from importlib import import_module
 from pathlib import Path
 from typing import Literal
 
@@ -20,17 +21,20 @@ class Settings(BaseSettings):
     )
 
     # LLM
+    openai_enabled: bool = Field(default=False)
     openai_api_key: str = Field(default="")
     openai_model: str = Field(default="gpt-4o-mini")
-    use_ollama: bool = Field(default=False)
+    use_ollama: bool = Field(default=True)
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="llama3.2")
+    ollama_embed_model: str = Field(default="nomic-embed-text")
 
     # GitHub
     github_token: str = Field(default="")
     github_webhook_secret: str = Field(default="dev_secret")
 
     # Jira
+    jira_enabled: bool = Field(default=False)
     jira_server: str = Field(default="")
     jira_email: str = Field(default="")
     jira_api_token: str = Field(default="")
@@ -59,7 +63,11 @@ class Settings(BaseSettings):
     @property
     def llm_provider(self) -> str:
         """Return the LLM provider name."""
-        return "ollama" if self.use_ollama else "openai"
+        if self.use_ollama:
+            return "ollama"
+        if self.openai_enabled:
+            return "openai"
+        return "none"
 
     @computed_field
     @property
@@ -69,8 +77,8 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
-    def jira_enabled(self) -> bool:
-        """Check if Jira is configured."""
+    def jira_configured(self) -> bool:
+        """Check if Jira credentials are configured."""
         return bool(self.jira_server and self.jira_email and self.jira_api_token)
 
     @computed_field
@@ -81,22 +89,37 @@ class Settings(BaseSettings):
 
     @field_validator("hitl_risk_threshold", "confidence_threshold", mode="before")
     @classmethod
-    def validate_threshold(cls, v: float) -> float:
-        """Validate that thresholds are between 0.0 and 1.0."""
-        if not 0.0 <= v <= 1.0:
+    def validate_threshold(cls, v: object) -> float:
+        """Validate that thresholds are numeric values between 0.0 and 1.0."""
+        try:
+            value = float(v)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Threshold must be a number between 0.0 and 1.0") from exc
+
+        if not 0.0 <= value <= 1.0:
             raise ValueError("Threshold must be between 0.0 and 1.0")
-        return v
+        return value
 
     @model_validator(mode="after")
     def validate_llm_config(self) -> Settings:
         """Validate that either OpenAI or Ollama is configured."""
-        if not self.use_ollama and not self.openai_api_key:
+        if self.use_ollama:
+            return self
+
+        if self.openai_enabled and self.openai_api_key:
+            return self
+
+        if self.openai_enabled and not self.openai_api_key:
             raise ValueError(
-                "Set OPENAI_API_KEY in .env, or set USE_OLLAMA=true and run:\n"
+                "Set OPENAI_API_KEY in .env when OPENAI_ENABLED=true, or set USE_OLLAMA=true and run:\n"
                 "  ollama pull llama3.2\n"
                 "  ollama pull nomic-embed-text"
             )
-        return self
+
+        raise ValueError(
+            "No LLM provider enabled. Set USE_OLLAMA=true (recommended), "
+            "or set OPENAI_ENABLED=true with OPENAI_API_KEY."
+        )
 
     def ensure_data_dirs(self) -> None:
         """Create local data directories if they don't exist yet."""
@@ -117,13 +140,24 @@ def get_llm():
     """Return the appropriate LangChain chat model based on settings."""
     settings = get_settings()
     if settings.use_ollama:
-        from langchain_community.chat_models import ChatOllama
+        try:
+            chat_ollama_cls = import_module("langchain_ollama").ChatOllama
+        except ImportError:  # pragma: no cover - compatibility path
+            chat_ollama_cls = import_module(
+                "langchain_community.chat_models"
+            ).ChatOllama
 
-        return ChatOllama(
+        return chat_ollama_cls(
             model=settings.ollama_model,
             base_url=settings.ollama_base_url,
             temperature=0,
         )
+
+    if not settings.openai_enabled:
+        raise RuntimeError(
+            "No LLM provider enabled. Set USE_OLLAMA=true or OPENAI_ENABLED=true."
+        )
+
     from langchain_openai import ChatOpenAI
 
     return ChatOpenAI(

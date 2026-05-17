@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from src.tools.github_pr import PRDetails
+
 
 @pytest.mark.asyncio
 class TestAPI:
@@ -36,6 +38,33 @@ class TestAPI:
         """GET /analyze/unknown-id returns 404."""
         response = await async_client.get("/analyze/does-not-exist-12345")
         assert response.status_code == 404
+
+    async def test_analyze_accepts_pr_url(self, async_client, monkeypatch):
+        """POST /analyze accepts pr_url and auto-hydrates metadata."""
+        from src.api.routes import analyze as analyze_route
+
+        def mock_fetch_pr_details(_repo, _pr_number, _token):
+            return PRDetails(
+                repo_full_name="vivekvxz/use-cases",
+                pr_number=1,
+                base_sha="abcdef1",
+                head_sha="1234567",
+                title="Test PR",
+                description="PR description",
+                author="vivekvxz",
+                changed_files=["src/cli.py"],
+            )
+
+        monkeypatch.setattr(analyze_route, "fetch_pr_details", mock_fetch_pr_details)
+
+        response = await async_client.post(
+            "/analyze",
+            json={"pr_url": "https://github.com/vivekvxz/use-cases/pull/1"},
+        )
+        assert response.status_code == 202
+        data = response.json()
+        assert data["status"] == "queued"
+        assert "analysis_id" in data
 
     async def test_webhook_rejects_bad_signature(self, async_client):
         """POST /webhook/github with bad signature returns 401."""

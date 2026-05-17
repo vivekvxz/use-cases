@@ -42,6 +42,7 @@ async def ingest_node(state: AgentState) -> dict:
             request.repo_full_name,
             request.base_sha,
             request.head_sha,
+            request.pr_number,
         )
 
         # Extract file contents and lint
@@ -207,7 +208,24 @@ async def risk_scoring_node(state: AgentState) -> dict:
         parsed = json.loads(response_text)
 
         overall_risk_level = RiskLevel(parsed["overall_risk_level"])
-        requires_human_review = bool(parsed.get("requires_human_review", False))
+        llm_requires_human_review = bool(parsed.get("requires_human_review", False))
+
+        # Enforce HITL policy in code so it does not rely solely on LLM compliance.
+        try:
+            overall_risk_score = float(parsed.get("overall_risk_score", 0.0))
+        except (TypeError, ValueError):
+            overall_risk_score = 0.0
+
+        has_critical_flag = any(
+            flag.risk_level == RiskLevel.CRITICAL
+            for flag in state.get("risk_flags", [])
+        )
+
+        requires_human_review = (
+            llm_requires_human_review
+            or overall_risk_score >= settings.hitl_risk_threshold
+            or has_critical_flag
+        )
 
         logger.info(
             "risk_scoring_node_complete",
